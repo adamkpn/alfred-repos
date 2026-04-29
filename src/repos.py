@@ -498,7 +498,12 @@ def do_search(repos, opts):
             valid[key] = True
 
     if opts.query:
-        repos = wf.filter(opts.query, repos, lambda t: t[0], min_score=30)
+        repos = wf.filter(
+            opts.query,
+            repos,
+            lambda t: '{} {}'.format(t[0], t[1]),
+            min_score=30,
+        )
         log.info('%d/%d repos match `%s`', len(repos), len(repos), opts.query)
 
     if not repos:
@@ -507,24 +512,29 @@ def do_search(repos, opts):
     home = os.environ['HOME']
     for r in repos:
         log.debug(r)
-        pretty_path = subtitle = r.path.replace(home, '~')
-        app = subtitles.get('default')
+        pretty_path = r.path.replace(home, '~')
+        # Title = repo name; subtitle = path (result subtext). "Open in …" for
+        # modifier keys is on modifier rows only (see add_modifier below).
+        title = r.name
+        subtitle = pretty_path
+        match = '{} {}'.format(r.name, r.path)
 
         # Check if Icon Path Exists else use default
         icon = 'icon.png'
         if os.path.isfile(os.path.dirname(r.path) + '/' + '.alfred-repos-icon.png'):
             icon = os.path.dirname(r.path) + '/' + '.alfred-repos-icon.png'
 
-        if app:
-            subtitle += ' //  ' + app
         it = wf.add_item(
-            r.name,
+            title,
             subtitle,
             arg=r.path,
             uid=r.path,
             valid=valid.get('default', False),
             type='file',
-            icon=icon
+            icon=icon,
+            largetext=r.path,
+            copytext=r.path,
+            match=match,
         )
         it.setvar('appkey', 'default')
 
