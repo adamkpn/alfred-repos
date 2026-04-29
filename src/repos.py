@@ -27,6 +27,8 @@ Options:
 
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -77,6 +79,13 @@ DEFAULT_SETTINGS = {
     'app_ctrl': None,
     'app_shift': None,
     'app_fn': None,
+    # If set, `reposettings` runs [settings_editor] + settings_editor_args + [settings.json]
+    # instead of `open` (default association). Example: "zed" with ["-n"] for a new workspace.
+    'settings_editor': None,
+    'settings_editor_args': None,
+    # Optional: map app name (same string as app_*) -> args for `open --args` when opening a repo
+    # folder (e.g. Zed ``-n`` for a new workspace). See README.
+    'repos_open_args_for_apps': None,
 }
 
 # Will be populated later
@@ -214,6 +223,77 @@ def repo_url(path):
     return 'https://' + re.sub(r':', '/', url).strip()
 
 
+def _extra_args_for_open_app(app_name):
+    """Return argv tokens to pass to an app after ``open ... --args``.
+
+    ``settings.json`` key ``repos_open_args_for_apps`` maps the same
+    application names you use in ``app_default`` / ``app_cmd`` / … to a list
+    of strings (or one string, split with :func:`shlex.split`). Lookup is
+    case-insensitive, so ``zed`` matches ``Zed``.
+
+    Used when opening a repo directory so flags like Zed's ``-n`` (new
+    workspace) are applied; plain ``open -a`` cannot pass those flags.
+
+    Args:
+        app_name (str): Application name from settings.
+
+    Returns:
+        list[str]: Extra arguments for the target app, or empty list.
+    """
+    raw = wf.settings.get('repos_open_args_for_apps')
+    if not raw or not isinstance(raw, dict):
+        return []
+    target = str(app_name).lower()
+    for key, val in raw.items():
+        if str(key).lower() != target:
+            continue
+        if val is None:
+            return []
+        if isinstance(val, list):
+            return [str(x) for x in val]
+        if isinstance(val, str):
+            return shlex.split(val)
+        log.warning('repos_open_args_for_apps[%r] must be a list or string', key)
+        return []
+    return []
+
+
+def _canonical_application_name(app):
+    """Map names so ``open -a`` resolves (e.g. CLI name ``zed`` → bundle ``Zed``)."""
+    s = str(app).strip()
+    if s.lower() == 'zed':
+        return 'Zed'
+    return app
+
+
+def _open_folder_with_app(app, path):
+    """Open directory ``path`` with a local application (not a browser URL)."""
+    extra = _extra_args_for_open_app(app)
+    canonical = _canonical_application_name(app)
+
+    if extra:
+        # Prefer a real CLI when the app name is a single token: `open --args`
+        # is unreliable for Zed and some editors; `zed -n path` works.
+        cli = None
+        if ' ' not in str(app).strip():
+            cli = _resolve_editor_executable(str(app).strip())
+        if cli:
+            cmd = [cli] + extra + [path]
+            log.info('opening folder via CLI %r', cmd)
+            subprocess.call(cmd)
+            return
+
+        cmd_open = ['open', '-n', '-a', canonical, '--args'] + extra + [path]
+        log.debug('open folder cmd=%r', cmd_open)
+        rc = subprocess.call(cmd_open)
+        if rc != 0:
+            log.warning('open with --args exited %s; trying plain open -a', rc)
+            subprocess.call(['open', '-a', canonical, path])
+        return
+
+    subprocess.call(['open', '-a', canonical, path])
+
+
 def do_open(opts):
     """Open repo in the specified application(s).
 
@@ -244,11 +324,104 @@ def do_open(opts):
                     subprocess.call(['open', '-a', app, url])
         else:
             log.info('opening %s with %s ...', opts.path, app)
-            subprocess.call(['open', '-a', app, opts.path])
+            _open_folder_with_app(app, opts.path)
+
+
+def _path_for_editor_lookup():
+    """PATH Alfred should use to find CLI editors (Alfred often omits Homebrew, etc.)."""
+    ordered = []
+    seen = set()
+    for extra in (
+        '/opt/homebrew/bin',
+        '/usr/local/bin',
+        os.path.expanduser('~/.local/bin'),
+    ):
+        if os.path.isdir(extra):
+            seen.add(extra)
+            ordered.append(extra)
+    for part in os.environ.get('PATH', '').split(os.pathsep):
+        if part and part not in seen and os.path.isdir(part):
+            seen.add(part)
+            ordered.append(part)
+    return os.pathsep.join(ordered)
+
+
+def _resolve_editor_executable(editor):
+    """Resolve ``settings_editor`` to an executable path.
+
+    Alfred workflows often run with a minimal ``PATH``, so bare names like
+    ``zed`` are not found unless installed under a standard system path.
+
+    Args:
+        editor (str): Value from ``settings_editor`` (trimmed).
+
+    Returns:
+        str | None: Executable path, or ``None`` if not found / not executable.
+    """
+    if not editor:
+        return None
+    if os.path.isabs(editor):
+        return editor if os.path.isfile(editor) and os.access(editor, os.X_OK) else None
+    if os.path.sep in editor:
+        p = os.path.abspath(editor)
+        return p if os.path.isfile(p) and os.access(p, os.X_OK) else None
+    found = shutil.which(editor, path=_path_for_editor_lookup())
+    if found:
+        return found
+    # Zed: the installable `zed` command is the `cli` helper inside the bundle,
+    # not the main `zed` GUI binary. Alfred often lacks /usr/local/bin on PATH.
+    if str(editor).lower() == 'zed':
+        for root in ('/Applications', os.path.expanduser('~/Applications')):
+            cli = os.path.join(root, 'Zed.app', 'Contents', 'MacOS', 'cli')
+            if os.path.isfile(cli) and os.access(cli, os.X_OK):
+                return cli
+    return None
+
+
+def _settings_editor_command():
+    """Build argv to open ``settings.json`` for :func:`do_settings`.
+
+    Returns:
+        tuple[list[str] | None, str | None]: ``(argv, None)`` when a custom
+        editor command should run; ``(None, reason)`` to fall back to ``open``
+        (reason is for logging / notifications).
+    """
+    raw = wf.settings.get('settings_editor')
+    if raw is None:
+        return None, None
+    if isinstance(raw, str):
+        editor = raw.strip()
+    else:
+        log.warning('settings_editor must be a string; using default open')
+        return None, None
+    if not editor:
+        return None, None
+
+    args = wf.settings.get('settings_editor_args')
+    if args is None:
+        extra = []
+    elif isinstance(args, str):
+        extra = shlex.split(args)
+    elif isinstance(args, list):
+        extra = [str(a) for a in args]
+    else:
+        log.warning('settings_editor_args must be a list or string; ignoring')
+        extra = []
+
+    resolved = _resolve_editor_executable(editor)
+    if not resolved:
+        log.warning('settings_editor %r not found or not executable', editor)
+        return None, editor
+
+    return [resolved] + extra + [wf.settings_path], None
 
 
 def do_settings():
-    """Open ``settings.json`` in default editor.
+    """Open ``settings.json`` in configured or default editor.
+
+    If ``settings_editor`` is set in workflow settings, runs that executable
+    with optional ``settings_editor_args`` followed by the settings file path.
+    Otherwise uses ``open`` (macOS default application for ``.json``).
 
     Args:
         opts (AttrDict): CLI options.
@@ -257,6 +430,32 @@ def do_settings():
         int: Exit status.
 
     """
+    cmd, missing_editor = _settings_editor_command()
+    if cmd:
+        log.info('opening settings with %r', cmd)
+        try:
+            rc = subprocess.call(cmd)
+        except OSError as err:
+            log.exception('failed to run settings editor')
+            notify(
+                'reposettings failed',
+                str(err),
+                'Could not run the configured editor. Opened settings with the default app instead.',
+                'Sosumi',
+            )
+            subprocess.call(['open', wf.settings_path])
+            return 0
+        if rc != 0:
+            log.warning('settings editor exited with code %s', rc)
+        return 0
+
+    if missing_editor:
+        notify(
+            'reposettings: editor not found',
+            missing_editor,
+            'Set settings_editor to the full path of the CLI (Alfred has a minimal PATH). Opened settings with the default app instead.',
+            'Sosumi',
+        )
     subprocess.call(['open', wf.settings_path])
     return 0
 
@@ -402,8 +601,18 @@ def main(wf):
 
     # Can't do anything with no directories to search
     if not search_dirs or is_defaults(wf.settings):
+        if not search_dirs:
+            subtitle = (
+                'Add at least one object to `search_dirs` with a real `path`. '
+                'Use `reposettings` to edit settings.json.'
+            )
+        else:
+            subtitle = (
+                '`search_dirs` still uses the placeholder path `{}` — replace it '
+                'with a folder that contains your git repos, save, then run `reposupdate`.'
+            ).format(DEFAULT_SEARCH_PATH)
         wf.add_item("You haven't configured any directories to search",
-                    'Use `reposettings` to edit your configuration',
+                    subtitle,
                     icon=ICON_WARNING)
         wf.send_feedback()
         return 0

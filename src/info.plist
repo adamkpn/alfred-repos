@@ -358,7 +358,7 @@ Usage
 	+ `^+↩` — Open selected repo in `app_ctrl`
 	+ `⇧+↩` — Open selected repo in `app_shift`
 	+ `fn+↩` — Open selected repo in `app_fn`
-- `reposettings` — Open `settings.json` in default JSON editor
+- `reposettings` — Open `settings.json` (default app, or `settings_editor` / `settings_editor_args` in settings.json)
 - `reposupdate` — Force workflow to update its cached list of repositories. (By default, the list will only be updated every 3 hours.)
 - `reposhelp` — Open this file in your browser
 
@@ -399,7 +399,7 @@ Use the `reposhelp` command to see the help file.</string>
 		<key>25BDF5B8-CC9C-444A-B35A-CD0ED5D35A84</key>
 		<dict>
 			<key>note</key>
-			<string>Open settings in your default editor</string>
+			<string>Open settings (default app or settings_editor in JSON)</string>
 			<key>xpos</key>
 			<real>40</real>
 			<key>ypos</key>
@@ -460,7 +460,7 @@ Use the `reposhelp` command to see the help file.</string>
 		<string>180</string>
 	</dict>
 	<key>version</key>
-	<string>4.3.0</string>
+	<string>4.4.0</string>
 	<key>webaddress</key>
 	<string>https://github.com/harrtho/alfred-repos</string>
 </dict>

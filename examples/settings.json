@@ -1,0 +1,23 @@
+{
+  "search_dirs": [
+    {
+      "path": "~/Development",
+      "depth": 2,
+      "name_for_parent": 1,
+      "excludes": []
+    }
+  ],
+  "global_exclude_patterns": [],
+  "app_default": "Zed",
+  "repos_open_args_for_apps": {
+    "zed": ["-n"]
+  },
+  "app_cmd": "Terminal",
+  "app_alt": null,
+  "app_ctrl": null,
+  "app_shift": null,
+  "app_fn": null,
+  "remote_name": "origin",
+  "settings_editor": "zed",
+  "settings_editor_args": ["-n"]
+}

@@ -30,7 +30,7 @@ details.
   - etc.
   - etc.
   - `→` — Open Alfred's default File Actions menu
-- `reposettings` — Open `settings.json` in default JSON editor
+- `reposettings` — Open `settings.json` in your default JSON app, or in a custom editor (see below)
 - `reposupdate` — Force workflow to update its cached list of repositories. (By default, the list
   will only be updated—in the background—every 3 hours.)
 - `reposhelp` — Open GitHub README in your browser
@@ -134,11 +134,57 @@ change the default update interval (3h → 180min) in the
 [Workflow Environment Variables][alfred-config-sheet] (the `[𝒙]` icon) in Alfred Preferences. Change
 the `UPDATE_EVERY_MINS` workflow variable to suit your needs.
 
+### Opening `settings.json` (`reposettings`)
+
+By default, `reposettings` runs `open` on `settings.json`, which uses whichever application macOS
+uses for JSON files. To use a specific editor and optional flags (for example [Zed][zed] with `-n`
+so each open uses a new workspace), set `settings_editor` to the executable name or full path, and
+optionally `settings_editor_args` to a list of arguments inserted before the file path:
+
+```javascript
+{
+  "settings_editor": "zed",
+  "settings_editor_args": ["-n"],
+  …
+}
+```
+
+`settings_editor_args` may be omitted (no extra arguments). You can also set it to a single string;
+it is split with shell-like rules (for example `"-n --wait"`).
+
+Alfred runs scripts with a **small `PATH`** (often without Homebrew). This workflow searches
+`/opt/homebrew/bin`, `/usr/local/bin`, and `~/.local/bin` when resolving a bare name like `zed`, and
+for `zed` it can fall back to `Zed.app/Contents/MacOS/cli` under `/Applications` or `~/Applications`.
+If it still cannot find your editor, set `settings_editor` to the **full path** of the executable
+(e.g. the path shown after Zed’s **cli: install** command).
+
+Updating the workflow **version in Alfred alone does not update Python files**. After pulling or
+building a new `.alfredworkflow`, import it again (or replace `repos.py` inside the workflow bundle)
+so `reposettings` runs the code that honours `settings_editor`.
+
+[zed]: https://zed.dev
+
 ### Open in Applications
 
-The applications specified by the `app_XYZ` options are all called using
+The applications specified by the `app_XYZ` options are normally opened with
 `open -a AppName path/to/directory`. You can configure any application that can open a directory in
 this manner. Some recommendations are Sublime Text, SourceTree, GitHub or iTerm.
+
+Some editors need **extra flags** (for example [Zed][zed] `-n` for a **new workspace**). Plain
+`open -a` cannot pass those to the app, so the workflow would always reuse the current workspace.
+Set **`repos_open_args_for_apps`** to a map from the same app string you use in `app_*` to a list of
+arguments. For a **single-token** app name, the workflow first tries to run a real CLI
+(e.g. Zed’s `cli` / `zed` with your flags and the repo path), because `open -a … --args` is
+unreliable for some editors. If no CLI is found, it uses  
+`open -n -a AppName --args <those-args> path/to/repo`  
+and falls back to plain `open -a` if that fails. Lookup is **case-insensitive** (`zed` matches `Zed`).
+
+```javascript
+  "app_default": "Zed",
+  "repos_open_args_for_apps": {
+    "zed": ["-n"]
+  },
+```
 
 The meta app `Browser` will open the repo's `remote/origin` URL in your default browser. Other
 recognized browsers are `Safari`, `Google Chrome`, `Firefox` and `WebKit`.

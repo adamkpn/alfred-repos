@@ -1,0 +1,23 @@
+{
+  "__workflow_last_version": "4.4.0",
+  "app_default": "zed",
+  "app_alt": null,
+  "app_ctrl": null,
+  "app_shift": null,
+  "app_fn": null,
+  "remote_name": "origin",
+  "global_exclude_patterns": [],
+  "search_dirs": [
+    {
+      "depth": 10,
+      "excludes": [],
+      "name_for_parent": 1,
+      "path": "~/Repos/gitlab"
+    }
+  ],
+  "settings_editor": "zed",
+  "settings_editor_args": ["-n"],
+  "repos_open_args_for_apps": {
+    "zed": ["-n"]
+  }
+}
