@@ -1,0 +1,59 @@
+# Build Repos-<version>.alfredworkflow and publish to GitHub Releases when a
+# version tag is pushed. The tag (e.g. v4.4.0) must match the root `version`
+# string in src/info.plist (without the leading v).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify tag matches src/info.plist
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$TAG_NAME" != v* ]]; then
+            echo "::error::Expected tag like v1.2.3, got: $TAG_NAME"
+            exit 1
+          fi
+          VERSION="${TAG_NAME#v}"
+          PLIST_VER="$(python3 -c "import plistlib; print(plistlib.load(open('src/info.plist','rb'))['version'])")"
+          if [[ "$VERSION" != "$PLIST_VER" ]]; then
+            echo "::error::Tag $TAG_NAME implies version '$VERSION' but src/info.plist has '$PLIST_VER'."
+            echo "Bump the plist version or use a matching tag."
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build .alfredworkflow
+        run: python3 scripts/build-workflow.py
+
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Repos-*.alfredworkflow
+          prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+          generate_release_notes: true
+          body: |
+            **Repos** Alfred workflow (${{ github.ref_name }}, plist version ${{ env.VERSION }}).
+
+            Download the **.alfredworkflow** asset below and open it in [Alfred](https://www.alfredapp.com) to install or update.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
